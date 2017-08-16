@@ -50,6 +50,10 @@ Binder系统中有三个不同的“职位”。
 
 **注意这是站在用户的角度！！，如果站在Binder驱动的角度就不是这个样子，后面会讲。**
 
+![Binder机制通信模型](G:\work\android\android_base\binder\Binder机制通信模型.jpg)
+
+可以看到`Client`要使用`Server`的某个服务，前提是这个服务在`ServiceManager`中注册过，`Client`知道要调用服务的哪个函数（函数编号指定）。综上`ServiceManager`起到中间桥梁的作用，所以`ServiceManager`是最先运行的。然后是`server`注册服务，最后是`client`使用服务。
+
 
 
 
