@@ -64,7 +64,7 @@ Binder系统中有三个不同的“职位”。
 
 ![Android自带测试程序](G:\work\android\android_base\binder\Android自带测试程序.jpg)
 
-我们先看看`sevice_manager.c`
+#### 1. 我们先看看`sevice_manager.c`
 
 ```c
 #include "binder.h"
@@ -121,6 +121,30 @@ int main(int argc, char **argv)
 - 解析 `binder_loop()`
 
   ```c
+  struct binder_write_read {
+   	signed long write_size;       
+   	signed long write_consumed;
+   	unsigned long write_buffer;
+   	signed long read_size;
+   	signed long read_consumed;
+   	unsigned long read_buffer;
+  };
+
+  int binder_write(struct binder_state *bs, void *data, size_t len)
+  {
+      struct binder_write_read bwr;
+      int res;
+
+      bwr.write_size = len;
+      bwr.write_consumed = 0;
+      bwr.write_buffer = (uintptr_t) data;
+      bwr.read_size = 0;
+      bwr.read_consumed = 0;
+      bwr.read_buffer = 0;
+      res = ioctl(bs->fd, BINDER_WRITE_READ, &bwr); 
+      return res;
+  }
+
   void binder_loop(struct binder_state *bs, binder_handler func)
   {
       int res;
@@ -131,24 +155,107 @@ int main(int argc, char **argv)
       bwr.write_consumed = 0;
       bwr.write_buffer = 0;
 
-      readbuf[0] = BC_ENTER_LOOPER;
-      binder_write(bs, readbuf, sizeof(uint32_t));
-
+      readbuf[0] = BC_ENTER_LOOPER;   // 标志位，告诉binder驱动开始循环读了
+      // 在里面指定了 read_buf = readbuf
+      binder_write(bs, readbuf, sizeof(uint32_t)); 
+  	/* 开始循环读数据 */
       for (;;) {
           bwr.read_size = sizeof(readbuf);
           bwr.read_consumed = 0;
           bwr.read_buffer = (uintptr_t) readbuf;
-
+          /* 这个ioctl，bwr中write_size = 0，表示要读数据 */  
           ioctl(bs->fd, BINDER_WRITE_READ, &bwr);
-        
+        	/* 没有数据会在这阻塞，一旦有数据解析数据，处理。 */
           binder_parse(bs, 0, (uintptr_t) readbuf, bwr.read_consumed, func);
       }
   }
+
+  int binder_parse(struct binder_state *bs, struct binder_io *bio,
+                   uintptr_t ptr, size_t size, binder_handler func)
+  {
+      int r = 1;
+      uintptr_t end = ptr + (uintptr_t) size;
+
+      while (ptr < end) {
+          uint32_t cmd = *(uint32_t *) ptr;
+          ptr += sizeof(uint32_t);
+
+          switch(cmd) {
+          case BR_TRANSACTION: {   // 传输数据
+              struct binder_transaction_data *txn = (struct binder_transaction_data *) ptr;
+            // 从这就可以看出，binder驱动返回给应用程序的是一个buf，
+            // 里面就存放一个或者多个 struct binder_transaction_data
+            // 这个结构有个特点，头部是一个int型数据 ：cmd
+         
+              if (func) { // func 是binder_loop 传入的处理函数，下面分析
+                  unsigned rdata[256/4];
+                  struct binder_io msg;
+                  struct binder_io reply;
+                  int res;
+
+                  bio_init(&reply, rdata, sizeof(rdata), 4);
+                  bio_init_from_txn(&msg, txn);
+                  // 传入的处理函数， 处理
+                  func(bs, txn, &msg, &reply);
+                  // 将返回值发送回去
+                  binder_send_reply(bs, &reply, txn->data.ptr.buffer, res);
+              }
+              ptr += sizeof(*txn);  // 处理下一个
+              break;
+          }
+      return r;
+  }
   ```
 
-  ​
+- 解析 处理函数`svcmgr_handler`
 
-  ​
+  ```c
+  int svcmgr_handler(struct binder_state *bs,
+                     struct binder_transaction_data *txn,
+                     struct binder_io *msg,
+                     struct binder_io *reply)
+  {
+      struct svcinfo *si;
+      uint16_t *s;
+      size_t len;
+      uint32_t handle;
+      uint32_t strict_policy;
+      int allow_isolated;
+
+      // 默认的，要在buf头部放一个0，没有意义。 
+      strict_policy = bio_get_uint32(msg);
+      // 取出 默认的字符串，标志
+      s = bio_get_string16(msg, &len);
+
+      switch(txn->code) {  // 根据 code 决定调用哪个函数
+      case SVC_MGR_GET_SERVICE:
+      case SVC_MGR_CHECK_SERVICE:   // 获取服务
+          s = bio_get_string16(msg, &len);  // 服务名
+          handle = do_find_service(bs, s, len, txn->sender_euid, txn->sender_pid);   // 在链表中查找服务，返回服务的引用
+          bio_put_ref(reply, handle);
+          return 0;
+
+      case SVC_MGR_ADD_SERVICE:  //  添加服务
+          s = bio_get_string16(msg, &len);  // 服务名
+          handle = bio_get_ref(msg);
+          allow_isolated = bio_get_uint32(msg) ? 1 : 0;
+          if (do_add_service(bs, s, len, handle, txn->sender_euid,
+              allow_isolated, txn->sender_pid))
+              return -1;
+          break;
+      }
+
+      bio_put_uint32(reply, 0);
+      return 0;
+  }
+  ```
+
+
+
+#### 2. Server端注册服务 
+
+
+
 
 
 
