@@ -254,6 +254,53 @@ int main(int argc, char **argv)
 
 #### 2. Server端注册服务 
 
+```c
+#define HELLO_SERVICE   0
+#define GOODBYE_SERVICE 1
+
+int hello(char *name){
+   fprintf(stderr,"hello %s.\n",name);
+   return  100;
+}
+
+void goodbye(int a,int b,char *name) {
+  	fprintf(stderr,"goodbye %s.\n",name);
+  	return a + b;
+}
+
+int main(int argc, char **argv)
+{
+  	struct binder_state *bs;
+  
+    unsigned iodata[512/4];
+    struct binder_io  msg, reply;
+  
+    bs = binder_open(128*1024);
+  
+    bio_init(&msg, iodata, sizeof(iodata), 4);     
+    bio_put_uint32(&msg, 0);  // strict mode header
+    bio_put_string16_x(&msg, SVC_MGR_NAME);  // 默认字符串
+    bio_put_string16_x(&msg, "hello");  // 服务名
+    
+    /* 注册服务 */
+    binder_call(bs, &msg, &reply, target, SVC_MGR_ADD_SERVICE);
+    status = bio_get_uint32(&reply);  //  返回值，表示注册成功与否
+    binder_done(bs, &msg, &reply);    // 清理空间
+  
+   //  goodbye 服务注册过程一样
+   
+  
+   while(true)
+   {
+      // 读数据
+      // 解析
+      // 跟serviceManager 过程差不多，解析完根据code决定调用hello还是goodbye
+      // 然后从buf中取函数需要的参数，最后调用完之后把返回值写入reply
+   }
+    
+}
+```
+
 
 
 
